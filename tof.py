@@ -1,31 +1,43 @@
 import time
-from machine import Pin, I2C
+from machine import Pin,I2C
 from vl53l0x import VL53L0X
 
-SDA_PIN = 0
-SCL_PIN = 1
 XSHUT_PIN = 2
+READY_PIN = None
+SDA_PIN = 4
+SCL_PIN = 5
 BUDGET_MS = 1000
 
+_sensor = None
+_latest = (None, 0, False)
+
 def init_sensor():
+    global _sensor
     xshut = Pin(XSHUT_PIN, Pin.OUT)
     xshut.off()
     time.sleep_ms(20)
     xshut.on()
     time.sleep_ms(20)
     i2c = I2C(0, sda=Pin(SDA_PIN), scl=Pin(SCL_PIN), freq=400000)
-    sensor = VL53L0X(i2c)
-    sensor.measurement_timing_budget = BUDGET_MS * 1000
-    sensor.start_continuous()
-    return sensor
+    _sensor = VL53L0X(i2c)
+    _sensor.measurement_timing_budget = BUDGET_MS * 1000
+    _sensor.start_continuous()
+    return _sensor
 
 def wait_for_ready(sensor, deadline_ms):
-    poll_ms = max(50, min(200, BUDGET_MS // 8))
+    poll_ms = max(50, min(200, BUDGET_MS // 4))
     while not sensor.data_ready and time.ticks_diff(deadline_ms, time.ticks_ms()) > 0:
         time.sleep_ms(poll_ms)
     return bool(sensor.data_ready)
 
-if __name__ == "__main__":
+def _update_latest(mm):
+    global _latest
+    _latest = (mm, time.ticks_ms(), True)
+
+def get_latest():
+    return _latest
+
+def main_loop():
     sensor = init_sensor()
     next_tick = time.ticks_add(time.ticks_ms(), BUDGET_MS)
     while True:
@@ -33,6 +45,7 @@ if __name__ == "__main__":
         if wait_for_ready(sensor, deadline):
             try:
                 mm = sensor.read_range()
+                _update_latest(mm)
                 print(mm)
             except Exception as e:
                 print("err", e)
@@ -43,4 +56,7 @@ if __name__ == "__main__":
             time.sleep_ms(delay)
         else:
             next_tick = time.ticks_add(time.ticks_ms(), BUDGET_MS)
+
+if __name__ == "__main__":
+    main_loop()
 
